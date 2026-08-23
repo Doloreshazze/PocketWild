@@ -1,6 +1,7 @@
 <div align="center">
   <img src="docs/pocketwild-banner.svg" width="760" alt="PocketWild — маленький друг, большой живой мир">
   <p><strong>Уютная Android-игра о питомце, который растёт и исследует мир вместе с вами.</strong></p>
+  <p><a href="https://github.com/Doloreshazze/PocketWild/actions/workflows/android.yml"><img src="https://github.com/Doloreshazze/PocketWild/actions/workflows/android.yml/badge.svg" alt="Android CI"></a></p>
 </div>
 
 ## Что уже можно делать
