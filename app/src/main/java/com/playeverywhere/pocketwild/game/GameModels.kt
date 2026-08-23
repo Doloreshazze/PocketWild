@@ -25,6 +25,21 @@ enum class CareAction(val title: String, val emoji: String) {
     REST("Спать", "🌙")
 }
 
+enum class PetEmotion(val title: String, val emoji: String) {
+    CALM("спокоен", "😌"),
+    HAPPY("счастлив", "😊"),
+    EXCITED("в восторге", "🤩"),
+    CURIOUS("заинтригован", "🧐"),
+    AFFECTIONATE("нежится", "🥰"),
+    PROUD("горд собой", "😏"),
+    SLEEPY("сонный", "😴"),
+    HUNGRY("голодный", "🥺"),
+    DIRTY("чумазый", "😅"),
+    LONELY("скучает", "😔")
+}
+
+enum class PersonalityTrait { PLAYFUL, GENTLE, CURIOUS, BALANCED }
+
 data class PetStats(
     val hunger: Int = 78,
     val joy: Int = 74,
@@ -45,6 +60,12 @@ data class GameState(
     val bondPoints: Int = 0,
     val bestBerryScore: Int = 0,
     val gamesPlayed: Int = 0,
+    val playfulPoints: Int = 0,
+    val gentlePoints: Int = 0,
+    val curiousPoints: Int = 0,
+    val emotion: PetEmotion = PetEmotion.CALM,
+    val emotionUntil: Long = 0,
+    val lastPettingAt: Long = 0,
     val feedCount: Int = 0,
     val playCount: Int = 0,
     val cleanCount: Int = 0,
@@ -63,6 +84,23 @@ data class GameState(
         bondPoints < 280 -> "Лучшие друзья"
         else -> "Неразлучны"
     }
+    val personalityTrait: PersonalityTrait get() {
+        val highest = maxOf(playfulPoints, gentlePoints, curiousPoints)
+        val lowest = minOf(playfulPoints, gentlePoints, curiousPoints)
+        if (highest - lowest <= 3) return PersonalityTrait.BALANCED
+        return when (highest) {
+            playfulPoints -> PersonalityTrait.PLAYFUL
+            gentlePoints -> PersonalityTrait.GENTLE
+            else -> PersonalityTrait.CURIOUS
+        }
+    }
+    val personalityTitle: String get() = when (personalityTrait) {
+        PersonalityTrait.PLAYFUL -> "Весёлый непоседа"
+        PersonalityTrait.GENTLE -> "Ласковое сердце"
+        PersonalityTrait.CURIOUS -> "Любопытный исследователь"
+        PersonalityTrait.BALANCED -> "Гармоничный друг"
+    }
+    val traitTotal: Int get() = (playfulPoints + gentlePoints + curiousPoints).coerceAtLeast(1)
     val questProgress: Int get() = minOf(feedCount, 2) + minOf(playCount, 1) + minOf(cleanCount, 1)
     val questComplete: Boolean get() = questProgress >= 4
 }

@@ -21,6 +21,12 @@ class GameStore(context: Context) {
         bondPoints = prefs.getInt("bondPoints", 0),
         bestBerryScore = prefs.getInt("bestBerryScore", 0),
         gamesPlayed = prefs.getInt("gamesPlayed", 0),
+        playfulPoints = prefs.getInt("playfulPoints", 0),
+        gentlePoints = prefs.getInt("gentlePoints", 0),
+        curiousPoints = prefs.getInt("curiousPoints", 0),
+        emotion = enumValueOrDefault(prefs.getString("emotion", null), PetEmotion.CALM),
+        emotionUntil = prefs.getLong("emotionUntil", 0),
+        lastPettingAt = prefs.getLong("lastPettingAt", 0),
         feedCount = prefs.getInt("feedCount", 0),
         playCount = prefs.getInt("playCount", 0),
         cleanCount = prefs.getInt("cleanCount", 0),
@@ -45,6 +51,12 @@ class GameStore(context: Context) {
             .putInt("bondPoints", state.bondPoints)
             .putInt("bestBerryScore", state.bestBerryScore)
             .putInt("gamesPlayed", state.gamesPlayed)
+            .putInt("playfulPoints", state.playfulPoints)
+            .putInt("gentlePoints", state.gentlePoints)
+            .putInt("curiousPoints", state.curiousPoints)
+            .putString("emotion", state.emotion.name)
+            .putLong("emotionUntil", state.emotionUntil)
+            .putLong("lastPettingAt", state.lastPettingAt)
             .putInt("feedCount", state.feedCount)
             .putInt("playCount", state.playCount)
             .putInt("cleanCount", state.cleanCount)
