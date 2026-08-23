@@ -42,6 +42,9 @@ data class GameState(
     val stats: PetStats = PetStats(),
     val xp: Int = 0,
     val coins: Int = 40,
+    val bondPoints: Int = 0,
+    val bestBerryScore: Int = 0,
+    val gamesPlayed: Int = 0,
     val feedCount: Int = 0,
     val playCount: Int = 0,
     val cleanCount: Int = 0,
@@ -52,6 +55,14 @@ data class GameState(
 ) {
     val level: Int get() = xp / 60 + 1
     val levelProgress: Float get() = (xp % 60) / 60f
+    val bondLevel: Int get() = bondPoints / 80 + 1
+    val bondProgress: Float get() = (bondPoints % 80) / 80f
+    val bondTitle: String get() = when {
+        bondPoints < 40 -> "Новые друзья"
+        bondPoints < 120 -> "Верные друзья"
+        bondPoints < 280 -> "Лучшие друзья"
+        else -> "Неразлучны"
+    }
     val questProgress: Int get() = minOf(feedCount, 2) + minOf(playCount, 1) + minOf(cleanCount, 1)
     val questComplete: Boolean get() = questProgress >= 4
 }

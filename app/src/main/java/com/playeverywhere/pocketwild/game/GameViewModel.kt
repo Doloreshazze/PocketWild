@@ -24,6 +24,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         update(result.state)
     }
 
+    fun completeBerryGame(score: Int) {
+        val result = GameEngine.completeBerryGame(_state.value, score)
+        update(result.state)
+    }
+
     private fun update(value: GameState) {
         _state.value = value
         store.save(value)
