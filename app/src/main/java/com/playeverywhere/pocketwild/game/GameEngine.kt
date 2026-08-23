@@ -55,6 +55,7 @@ object GameEngine {
                     stats = s.copy(hunger = raise(s.hunger, 24), energy = raise(s.energy, 3)),
                     coins = fresh.coins - 5,
                     xp = fresh.xp + 5,
+                    bondPoints = fresh.bondPoints + 4,
                     feedCount = fresh.feedCount + 1
                 ) to "М-м-м! Самая вкусная ягода!"
             }
@@ -64,17 +65,20 @@ object GameEngine {
                     stats = s.copy(joy = raise(s.joy, 26), energy = lower(s.energy, 12), hygiene = lower(s.hygiene, 4)),
                     coins = fresh.coins + 3,
                     xp = fresh.xp + 8,
+                    bondPoints = fresh.bondPoints + 7,
                     playCount = fresh.playCount + 1
                 ) to "Вот это приключение! Ещё раз?"
             }
             CareAction.CLEAN -> fresh.copy(
                 stats = s.copy(hygiene = raise(s.hygiene, 38), joy = lower(s.joy, 2)),
                 xp = fresh.xp + 4,
+                bondPoints = fresh.bondPoints + 3,
                 cleanCount = fresh.cleanCount + 1
             ) to "Чистота! Теперь я сияю."
             CareAction.REST -> fresh.copy(
                 stats = s.copy(energy = raise(s.energy, 34), hunger = lower(s.hunger, 6)),
-                xp = fresh.xp + 3
+                xp = fresh.xp + 3,
+                bondPoints = fresh.bondPoints + 2
             ) to "Мне приснился светящийся лес..."
         }
 
@@ -94,6 +98,32 @@ object GameEngine {
         }
         return ActionResult(
             state.copy(habitat = habitat, xp = state.xp + 2, lastMessage = message),
+            message
+        )
+    }
+
+    fun completeBerryGame(state: GameState, score: Int): ActionResult {
+        val safeScore = score.coerceIn(0, 99)
+        val reward = safeScore * 2 + 5
+        val message = when {
+            safeScore >= 12 -> "Мы потрясающая команда! Вот это рекорд!"
+            safeScore >= 7 -> "Здорово поймали! Давай сыграем ещё."
+            safeScore >= 3 -> "Мне понравилось играть вместе!"
+            else -> "Главное, что мы играли вместе."
+        }
+        return ActionResult(
+            state.copy(
+                stats = state.stats.copy(
+                    joy = raise(state.stats.joy, 12 + safeScore.coerceAtMost(8)),
+                    energy = lower(state.stats.energy, 5)
+                ),
+                coins = state.coins + reward,
+                xp = state.xp + safeScore * 3 + 5,
+                bondPoints = state.bondPoints + safeScore * 2 + 3,
+                bestBerryScore = maxOf(state.bestBerryScore, safeScore),
+                gamesPlayed = state.gamesPlayed + 1,
+                lastMessage = message
+            ),
             message
         )
     }

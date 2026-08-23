@@ -46,4 +46,15 @@ class GameEngineTest {
         val result = GameEngine.visit(state, Habitat.FOREST)
         assertEquals(Habitat.HOME, result.state.habitat)
     }
+
+    @Test
+    fun berryGameBuildsBondAndKeepsBestScore() {
+        val state = GameState(hasPet = true, coins = 10, bondPoints = 4, bestBerryScore = 8)
+        val result = GameEngine.completeBerryGame(state, 6).state
+
+        assertEquals(1, result.gamesPlayed)
+        assertEquals(8, result.bestBerryScore)
+        assertEquals(19, result.bondPoints)
+        assertEquals(27, result.coins)
+    }
 }

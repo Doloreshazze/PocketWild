@@ -18,6 +18,9 @@ class GameStore(context: Context) {
         ),
         xp = prefs.getInt("xp", 0),
         coins = prefs.getInt("coins", 40),
+        bondPoints = prefs.getInt("bondPoints", 0),
+        bestBerryScore = prefs.getInt("bestBerryScore", 0),
+        gamesPlayed = prefs.getInt("gamesPlayed", 0),
         feedCount = prefs.getInt("feedCount", 0),
         playCount = prefs.getInt("playCount", 0),
         cleanCount = prefs.getInt("cleanCount", 0),
@@ -39,6 +42,9 @@ class GameStore(context: Context) {
             .putInt("hygiene", state.stats.hygiene)
             .putInt("xp", state.xp)
             .putInt("coins", state.coins)
+            .putInt("bondPoints", state.bondPoints)
+            .putInt("bestBerryScore", state.bestBerryScore)
+            .putInt("gamesPlayed", state.gamesPlayed)
             .putInt("feedCount", state.feedCount)
             .putInt("playCount", state.playCount)
             .putInt("cleanCount", state.cleanCount)

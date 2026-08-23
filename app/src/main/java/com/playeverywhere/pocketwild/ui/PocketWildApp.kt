@@ -12,6 +12,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -47,6 +49,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -58,10 +61,13 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
 import com.playeverywhere.pocketwild.game.CareAction
 import com.playeverywhere.pocketwild.audio.PetVoice
@@ -74,10 +80,14 @@ import com.playeverywhere.pocketwild.game.PetStats
 import com.playeverywhere.pocketwild.game.Species
 import kotlinx.coroutines.delay
 import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.random.Random
 
 private enum class AppTab(val title: String, val emoji: String) {
     HOME("Дом", "🏠"),
+    GAMES("Игры", "🎮"),
     EXPLORE("Мир", "🗺️"),
     JOURNAL("Дневник", "📖")
 }
@@ -93,7 +103,8 @@ fun PocketWildApp(viewModel: GameViewModel) {
         GameScreen(
             state = state,
             onAction = viewModel::act,
-            onVisit = viewModel::visit
+            onVisit = viewModel::visit,
+            onBerryGameComplete = viewModel::completeBerryGame
         )
     }
 }
@@ -186,7 +197,8 @@ private fun SpeciesCard(species: Species, selected: Boolean, modifier: Modifier,
 private fun GameScreen(
     state: GameState,
     onAction: (CareAction) -> Unit,
-    onVisit: (Habitat) -> Unit
+    onVisit: (Habitat) -> Unit,
+    onBerryGameComplete: (Int) -> Unit
 ) {
     var tab by remember { mutableStateOf(AppTab.HOME) }
     Scaffold(
@@ -195,6 +207,7 @@ private fun GameScreen(
     ) { padding ->
         when (tab) {
             AppTab.HOME -> HomeScreen(state, onAction, Modifier.padding(padding))
+            AppTab.GAMES -> GamesScreen(state, onBerryGameComplete, Modifier.padding(padding))
             AppTab.EXPLORE -> ExploreScreen(state, onVisit, Modifier.padding(padding))
             AppTab.JOURNAL -> JournalScreen(state, Modifier.padding(padding))
         }
@@ -266,7 +279,7 @@ private fun PlayerHeader(state: GameState) {
         ) {
             Column(Modifier.weight(1f)) {
                 Text(state.petName, fontSize = 21.sp, fontWeight = FontWeight.Black)
-                Text("Уровень ${state.level} • ${GameEngine.mood(state.stats)}", fontSize = 12.sp, color = Color(0xFF60736C))
+                Text("Уровень ${state.level} • ${GameEngine.mood(state.stats)} • ${state.bondTitle}", fontSize = 11.sp, color = Color(0xFF60736C), maxLines = 1)
                 LinearProgressIndicator(
                     progress = { state.levelProgress },
                     modifier = Modifier
@@ -365,6 +378,181 @@ private fun BottomTabs(selected: AppTab, onSelect: (AppTab) -> Unit) {
 }
 
 @Composable
+private fun GamesScreen(state: GameState, onBerryGameComplete: (Int) -> Unit, modifier: Modifier = Modifier) {
+    LazyColumn(
+        modifier.fillMaxSize().statusBarsPadding(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Text("Играем вместе", fontSize = 30.sp, fontWeight = FontWeight.Black)
+            Text("Мини-игры укрепляют дружбу и приносят ягодные монеты.", color = Color(0xFF60736C), modifier = Modifier.padding(top = 3.dp))
+        }
+        item { BerryCatchGame(state, onBerryGameComplete) }
+        item {
+            Surface(color = Color(0xFFFFFBF4), shape = RoundedCornerShape(22.dp)) {
+                Row(Modifier.fillMaxWidth().padding(17.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("🎵", fontSize = 34.sp)
+                    Column(Modifier.weight(1f).padding(start = 13.dp)) {
+                        Text("Повтори мелодию", fontWeight = FontWeight.Bold)
+                        Text("Семейная игра на память", fontSize = 13.sp, color = Color(0xFF60736C))
+                    }
+                    Text("Скоро", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BerryCatchGame(state: GameState, onComplete: (Int) -> Unit) {
+    var running by remember { mutableStateOf(false) }
+    var finished by remember { mutableStateOf(false) }
+    var score by remember { mutableStateOf(0) }
+    var lives by remember { mutableStateOf(3) }
+    var secondsLeft by remember { mutableStateOf(22) }
+    var petX by remember { mutableStateOf(.5f) }
+    var berryX by remember { mutableStateOf(.5f) }
+    var berryY by remember { mutableStateOf(-.06f) }
+    var golden by remember { mutableStateOf(false) }
+    var arenaWidth by remember { mutableStateOf(1) }
+    var petWidth by remember { mutableStateOf(1) }
+
+    fun resetBerry() {
+        berryX = Random.nextFloat() * .76f + .12f
+        berryY = -.06f
+        golden = Random.nextFloat() < .18f
+    }
+
+    fun startGame() {
+        score = 0
+        lives = 3
+        secondsLeft = 22
+        petX = .5f
+        finished = false
+        resetBerry()
+        PetVoice.play(state.species, VoiceCue.PLAY)
+        running = true
+    }
+
+    LaunchedEffect(running) {
+        if (!running) return@LaunchedEffect
+        var lastFrame = withFrameNanos { it }
+        val startTime = lastFrame
+        while (running) {
+            val now = withFrameNanos { it }
+            val delta = ((now - lastFrame) / 1_000_000_000f).coerceAtMost(.05f)
+            val elapsed = (now - startTime) / 1_000_000_000f
+            lastFrame = now
+            secondsLeft = (22 - elapsed.toInt()).coerceAtLeast(0)
+            berryY += delta * (.40f + score * .012f)
+
+            if (berryY > .76f) {
+                if (abs(berryX - petX) < .17f) {
+                    score += if (golden) 2 else 1
+                } else {
+                    lives -= 1
+                }
+                resetBerry()
+            }
+
+            if (lives <= 0 || elapsed >= 22f) {
+                running = false
+                finished = true
+                onComplete(score)
+                PetVoice.play(state.species, if (score >= 6) VoiceCue.PLAY else VoiceCue.HELLO)
+                break
+            }
+        }
+    }
+
+    Surface(color = Color(0xFF283A42), contentColor = Color.White, shape = RoundedCornerShape(26.dp), shadowElevation = 3.dp) {
+        Column {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Ягодный дождь", fontSize = 20.sp, fontWeight = FontWeight.Black)
+                    Text("Рекорд: ${state.bestBerryScore}", fontSize = 11.sp, color = Color.White.copy(alpha = .7f))
+                }
+                if (running) {
+                    Text("⏱ $secondsLeft", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.size(12.dp))
+                    Text("❤️".repeat(lives), fontSize = 14.sp)
+                    Spacer(Modifier.size(12.dp))
+                    Text("🍓 $score", color = Color(0xFFFFD084), fontWeight = FontWeight.Black)
+                }
+            }
+
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(350.dp)
+                    .onSizeChanged { arenaWidth = it.width.coerceAtLeast(1) }
+                    .pointerInput(running, arenaWidth) {
+                        if (running) detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            petX = (petX + dragAmount.x / arenaWidth).coerceIn(.10f, .90f)
+                        }
+                    }
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    drawRect(Brush.verticalGradient(listOf(Color(0xFF8FD0DA), Color(0xFFE8E9B1), Color(0xFF87B76E))))
+                    drawCircle(Color(0xFFFFE29A).copy(alpha = .8f), size.minDimension*.08f, Offset(size.width*.82f, size.height*.15f))
+                    repeat(4) { i ->
+                        drawOval(Color.White.copy(alpha = .52f), Offset((i*.29f-.08f)*size.width, (55+i%2*48).toFloat()), Size(105f, 33f))
+                    }
+                    drawRect(Color(0xFF5B965C), Offset(0f, size.height*.78f), Size(size.width, size.height*.22f))
+                    drawLine(Color.White.copy(alpha=.4f), Offset(0f,size.height*.76f), Offset(size.width,size.height*.76f), 3f)
+                    if (running) {
+                        val berry = Offset(berryX*size.width, berryY*size.height)
+                        val berryColor = if (golden) Color(0xFFFFC928) else Color(0xFFE94C64)
+                        drawCircle(berryColor, if (golden) 18f else 15f, berry)
+                        drawCircle(Color.White.copy(alpha=.5f), 4f, berry-Offset(5f,5f))
+                        drawLine(Color(0xFF397555), berry-Offset(0f,13f), berry+Offset(8f,-24f), 5f, StrokeCap.Round)
+                        if (golden) drawSpark(berry+Offset(25f,-12f), 7f, Color(0xFFFFF1A8))
+                    }
+                }
+
+                PetCharacter(
+                    species = state.species,
+                    mood = "счастлив",
+                    action = if (running) CareAction.PLAY else null,
+                    actionKey = if (running) score + 1 else 0,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .offset { IntOffset((petX*arenaWidth-petWidth/2f).roundToInt(), 0) }
+                        .size(112.dp)
+                        .onSizeChanged { petWidth = it.width.coerceAtLeast(1) }
+                )
+
+                if (!running) {
+                    Surface(
+                        color = Color(0xFF253239).copy(alpha = .92f),
+                        contentColor = Color.White,
+                        shape = RoundedCornerShape(22.dp),
+                        modifier = Modifier.align(Alignment.Center).padding(22.dp)
+                    ) {
+                        Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(if (finished) "Счёт: $score 🍓" else "Лови ягоды!", fontSize = 24.sp, fontWeight = FontWeight.Black)
+                            Text(
+                                if (finished) "+${score*2+5} монет • дружба стала крепче" else "Веди питомца пальцем.\nЗолотая ягода даёт два очка.",
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp,
+                                textAlign = TextAlign.Center,
+                                color = Color.White.copy(alpha=.8f),
+                                modifier = Modifier.padding(top=7.dp, bottom=14.dp)
+                            )
+                            Button(onClick = ::startGame, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD084), contentColor = Color(0xFF302A31))) {
+                                Text(if (finished) "Ещё раз" else "Играть", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ExploreScreen(state: GameState, onVisit: (Habitat) -> Unit, modifier: Modifier = Modifier) {
     LazyColumn(
         modifier.fillMaxSize().statusBarsPadding(),
@@ -448,6 +636,28 @@ private fun JournalScreen(state: GameState, modifier: Modifier = Modifier) {
                         strokeCap = StrokeCap.Round,
                         modifier = Modifier.fillMaxWidth().padding(top = 14.dp).height(7.dp)
                     )
+                }
+            }
+        }
+        item {
+            Surface(color = Color(0xFF6D5BB5), contentColor = Color.White, shape = RoundedCornerShape(25.dp)) {
+                Column(Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("💞", fontSize = 28.sp)
+                        Column(Modifier.weight(1f).padding(start = 11.dp)) {
+                            Text(state.bondTitle, fontSize = 19.sp, fontWeight = FontWeight.Black)
+                            Text("Уровень дружбы ${state.bondLevel}", fontSize = 12.sp, color = Color.White.copy(alpha=.75f))
+                        }
+                        Text("${state.bondPoints} ♥", color = Color(0xFFFFD6E4), fontWeight = FontWeight.Bold)
+                    }
+                    LinearProgressIndicator(
+                        progress = { state.bondProgress },
+                        color = Color(0xFFFFB8D1),
+                        trackColor = Color.White.copy(alpha=.17f),
+                        strokeCap = StrokeCap.Round,
+                        modifier = Modifier.fillMaxWidth().padding(top=14.dp).height(8.dp)
+                    )
+                    Text("Совместных игр: ${state.gamesPlayed} • лучший ягодный счёт: ${state.bestBerryScore}", fontSize = 11.sp, color = Color.White.copy(alpha=.78f), modifier = Modifier.padding(top=9.dp))
                 }
             }
         }
@@ -703,6 +913,7 @@ private fun DrawScope.drawFace(
 }
 
 private fun DrawScope.drawActionEffects(action: CareAction?, p: Float, c: Offset, s: Float, behind: Boolean) {
+    if (p >= .995f) return
     when (action) {
         CareAction.FEED -> if (!behind) {
             val travel = (p / .72f).coerceIn(0f, 1f)
