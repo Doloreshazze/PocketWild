@@ -77,6 +77,7 @@ import com.playeverywhere.pocketwild.game.GameState
 import com.playeverywhere.pocketwild.game.GameViewModel
 import com.playeverywhere.pocketwild.game.Habitat
 import com.playeverywhere.pocketwild.game.PetStats
+import com.playeverywhere.pocketwild.game.PetEmotion
 import com.playeverywhere.pocketwild.game.Species
 import kotlinx.coroutines.delay
 import kotlin.math.PI
@@ -104,7 +105,8 @@ fun PocketWildApp(viewModel: GameViewModel) {
             state = state,
             onAction = viewModel::act,
             onVisit = viewModel::visit,
-            onBerryGameComplete = viewModel::completeBerryGame
+            onBerryGameComplete = viewModel::completeBerryGame,
+            onPetTap = viewModel::petPet
         )
     }
 }
@@ -198,7 +200,8 @@ private fun GameScreen(
     state: GameState,
     onAction: (CareAction) -> Unit,
     onVisit: (Habitat) -> Unit,
-    onBerryGameComplete: (Int) -> Unit
+    onBerryGameComplete: (Int) -> Unit,
+    onPetTap: () -> Unit
 ) {
     var tab by remember { mutableStateOf(AppTab.HOME) }
     Scaffold(
@@ -206,7 +209,7 @@ private fun GameScreen(
         bottomBar = { BottomTabs(selected = tab, onSelect = { tab = it }) }
     ) { padding ->
         when (tab) {
-            AppTab.HOME -> HomeScreen(state, onAction, Modifier.padding(padding))
+            AppTab.HOME -> HomeScreen(state, onAction, onPetTap, Modifier.padding(padding))
             AppTab.GAMES -> GamesScreen(state, onBerryGameComplete, Modifier.padding(padding))
             AppTab.EXPLORE -> ExploreScreen(state, onVisit, Modifier.padding(padding))
             AppTab.JOURNAL -> JournalScreen(state, Modifier.padding(padding))
@@ -215,7 +218,7 @@ private fun GameScreen(
 }
 
 @Composable
-private fun HomeScreen(state: GameState, onAction: (CareAction) -> Unit, modifier: Modifier = Modifier) {
+private fun HomeScreen(state: GameState, onAction: (CareAction) -> Unit, onPetTap: () -> Unit, modifier: Modifier = Modifier) {
     var cue by remember { mutableStateOf<ActionCue?>(null) }
     var cueId by remember { mutableStateOf(0) }
 
@@ -242,16 +245,20 @@ private fun HomeScreen(state: GameState, onAction: (CareAction) -> Unit, modifie
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             PlayerHeader(state)
-            SpeechBubble(state.lastMessage, Modifier.padding(top = 10.dp))
+            val emotion = GameEngine.emotion(state)
+            SpeechBubble(state.lastMessage, emotion, Modifier.padding(top = 10.dp))
             PetCharacter(
                 species = state.species,
-                mood = GameEngine.mood(state.stats),
+                mood = emotion.title,
                 action = cue?.action,
                 actionKey = cue?.id ?: 0,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .clickable { PetVoice.play(state.species, VoiceCue.HELLO) }
+                    .clickable {
+                        PetVoice.play(state.species, VoiceCue.HELLO)
+                        onPetTap()
+                    }
             )
             StatsCard(state.stats)
             Row(
@@ -279,7 +286,7 @@ private fun PlayerHeader(state: GameState) {
         ) {
             Column(Modifier.weight(1f)) {
                 Text(state.petName, fontSize = 21.sp, fontWeight = FontWeight.Black)
-                Text("Уровень ${state.level} • ${GameEngine.mood(state.stats)} • ${state.bondTitle}", fontSize = 11.sp, color = Color(0xFF60736C), maxLines = 1)
+                Text("Уровень ${state.level} • ${state.bondTitle}", fontSize = 11.sp, color = Color(0xFF60736C), maxLines = 1)
                 LinearProgressIndicator(
                     progress = { state.levelProgress },
                     modifier = Modifier
@@ -299,9 +306,16 @@ private fun PlayerHeader(state: GameState) {
 }
 
 @Composable
-private fun SpeechBubble(text: String, modifier: Modifier = Modifier) {
+private fun SpeechBubble(text: String, emotion: PetEmotion, modifier: Modifier = Modifier) {
     Surface(modifier, color = Color.White.copy(alpha = .88f), shape = RoundedCornerShape(18.dp)) {
-        Text(text, Modifier.padding(horizontal = 15.dp, vertical = 9.dp), fontSize = 13.sp, textAlign = TextAlign.Center)
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(emotion.emoji, fontSize = 22.sp)
+            Column(Modifier.padding(start = 9.dp)) {
+                Text(text, fontSize = 13.sp, textAlign = TextAlign.Start)
+                Text("Сейчас ${emotion.title}", fontSize = 10.sp, color = Color(0xFF6D7C76), fontWeight = FontWeight.SemiBold)
+                Text("Коснись питомца, чтобы погладить", fontSize = 9.sp, color = Color(0xFF87938E))
+            }
+        }
     }
 }
 
@@ -661,16 +675,32 @@ private fun JournalScreen(state: GameState, modifier: Modifier = Modifier) {
                 }
             }
         }
+        item {
+            Surface(color = Color(0xFFFFE4C3), contentColor = Color(0xFF3C3028), shape = RoundedCornerShape(25.dp)) {
+                Column(Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🌟", fontSize = 28.sp)
+                        Column(Modifier.padding(start=11.dp)) {
+                            Text(state.personalityTitle, fontSize = 19.sp, fontWeight = FontWeight.Black)
+                            Text("Характер меняется от совместных занятий", fontSize = 11.sp, color = Color(0xFF7A6657))
+                        }
+                    }
+                    TraitBar("Озорство", "🎈", state.playfulPoints, state.traitTotal, Color(0xFFFF8B5E))
+                    TraitBar("Нежность", "💗", state.gentlePoints, state.traitTotal, Color(0xFFE879A7))
+                    TraitBar("Любопытство", "🔎", state.curiousPoints, state.traitTotal, Color(0xFF6C91D8))
+                }
+            }
+        }
         item { SectionTitle("Портрет питомца") }
         item {
             Surface(color = Color(0xFFFFFBF4), shape = RoundedCornerShape(24.dp)) {
                 Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(84.dp).background(Color(state.species.accent).copy(alpha = .20f), CircleShape)) {
-                        PetCharacter(state.species, GameEngine.mood(state.stats), Modifier.fillMaxSize())
+                        PetCharacter(state.species, GameEngine.emotion(state).title, Modifier.fillMaxSize())
                     }
                     Column(Modifier.padding(start = 16.dp)) {
                         Text(state.petName, fontSize = 23.sp, fontWeight = FontWeight.Black)
-                        Text("${state.species.title} • ${GameEngine.mood(state.stats)}", color = Color(0xFF60736C))
+                        Text("${state.species.title} • ${GameEngine.emotion(state).title}", color = Color(0xFF60736C))
                         Text("${state.xp} опыта • ${state.coins} ягод-монет", fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
                     }
                 }
@@ -692,6 +722,24 @@ private fun QuestRow(title: String, progress: Int, target: Int) {
         Text(if (progress >= target) "✅" else "○", fontSize = 18.sp)
         Text(title, Modifier.weight(1f).padding(start = 9.dp), fontSize = 14.sp)
         Text("$progress/$target", fontSize = 12.sp, color = Color.White.copy(alpha = .75f))
+    }
+}
+
+@Composable
+private fun TraitBar(label: String, emoji: String, points: Int, total: Int, color: Color) {
+    Column(Modifier.fillMaxWidth().padding(top=12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(emoji, fontSize=14.sp)
+            Text(label, Modifier.weight(1f).padding(start=7.dp), fontSize=12.sp, fontWeight=FontWeight.SemiBold)
+            Text(points.toString(), fontSize=11.sp, color=Color(0xFF7A6657))
+        }
+        LinearProgressIndicator(
+            progress = { (points / total.toFloat()).coerceIn(0f,1f) },
+            color = color,
+            trackColor = Color.White.copy(alpha=.7f),
+            strokeCap = StrokeCap.Round,
+            modifier = Modifier.fillMaxWidth().padding(top=5.dp).height(7.dp)
+        )
     }
 }
 
@@ -816,8 +864,8 @@ private fun PetCharacter(
         }
         val ground = Offset(size.width / 2f, size.height / 2f + bob * s)
         val center = ground + Offset(0f, jump * s)
-        val eyesClosed = mood == "сонный" || action == CareAction.REST || blink > .55f
-        val mouthOpen = action == CareAction.FEED && p in .24f..82f
+        val eyesClosed = mood == PetEmotion.SLEEPY.title || mood == PetEmotion.AFFECTIONATE.title || action == CareAction.REST || blink > .55f
+        val mouthOpen = (action == CareAction.FEED && p in .24f..82f) || mood == PetEmotion.EXCITED.title
 
         drawOval(
             Color.Black.copy(alpha = .13f - (-jump / 48f).coerceIn(0f, 1f) * .06f),
@@ -833,6 +881,7 @@ private fun PetCharacter(
             }
         }
         drawActionEffects(action, p, center, s, behind = false)
+        if (action == null) drawEmotionEffects(mood, center, s, idleWave)
     }
 }
 
@@ -898,17 +947,58 @@ private fun DrawScope.drawFace(
         drawArc(dark, 15f, 150f, false, Offset(c.x - (eyeSpread+10)*s, c.y + (eyeY-5)*s), Size(20*s, 12*s), style = Stroke(4*s, cap = StrokeCap.Round))
         drawArc(dark, 15f, 150f, false, Offset(c.x + (eyeSpread-10)*s, c.y + (eyeY-5)*s), Size(20*s, 12*s), style = Stroke(4*s, cap = StrokeCap.Round))
     } else {
-        drawCircle(dark, 6*s, Offset(c.x - eyeSpread*s, c.y + eyeY*s))
-        drawCircle(dark, 6*s, Offset(c.x + eyeSpread*s, c.y + eyeY*s))
-        drawCircle(Color.White, 2*s, Offset(c.x - (eyeSpread+2)*s, c.y + (eyeY-2)*s))
-        drawCircle(Color.White, 2*s, Offset(c.x + (eyeSpread-2)*s, c.y + (eyeY-2)*s))
+        val eyeShift = if (mood == PetEmotion.CURIOUS.title) 3f else 0f
+        val eyeRadius = if (mood == PetEmotion.EXCITED.title) 8f else 6f
+        drawCircle(dark, eyeRadius*s, Offset(c.x - eyeSpread*s + eyeShift*s, c.y + eyeY*s))
+        drawCircle(dark, eyeRadius*s, Offset(c.x + eyeSpread*s + eyeShift*s, c.y + eyeY*s))
+        drawCircle(Color.White, 2*s, Offset(c.x - (eyeSpread+2)*s + eyeShift*s, c.y + (eyeY-2)*s))
+        drawCircle(Color.White, 2*s, Offset(c.x + (eyeSpread-2)*s + eyeShift*s, c.y + (eyeY-2)*s))
     }
     if (mouthOpen) {
         drawOval(dark, Offset(c.x - 11*s, c.y + 19*s), Size(22*s, 22*s))
         drawArc(Color(0xFFFF8FA3), 180f, 180f, true, Offset(c.x - 7*s, c.y + 29*s), Size(14*s, 8*s))
     } else {
-        val smileSweep = if (mood == "скучает" || mood == "голодный") -140f else 140f
+        val smileSweep = if (mood == PetEmotion.LONELY.title || mood == PetEmotion.HUNGRY.title) -140f else 140f
         drawArc(dark, 20f, smileSweep, false, Offset(c.x - 13*s, c.y - 1*s), Size(26*s, 18*s), style = Stroke(3*s, cap = StrokeCap.Round))
+    }
+}
+
+private fun DrawScope.drawEmotionEffects(mood: String, c: Offset, s: Float, phase: Float) {
+    when (mood) {
+        PetEmotion.AFFECTIONATE.title -> repeat(3) { i ->
+            drawHeart(c + Offset((-72+i*72)*s, (-92-kotlin.math.abs(phase)*12-i%2*18)*s), 8*s, .78f)
+        }
+        PetEmotion.EXCITED.title -> repeat(5) { i ->
+            drawSpark(c + Offset((-105+i*52)*s, (-90-i%2*30)*s), (6+i%2*2)*s, Color(0xFFFFE38E))
+        }
+        PetEmotion.CURIOUS.title -> {
+            drawCircle(Color.White.copy(alpha=.65f), 17*s, c+Offset(82*s,-96*s))
+            drawCircle(Color.White.copy(alpha=.5f), 7*s, c+Offset(58*s,-70*s))
+            drawArc(Color(0xFF566C7A), 195f, 225f, false, c+Offset(69*s,-111*s), Size(24*s,24*s), style=Stroke(4*s,cap=StrokeCap.Round))
+            drawCircle(Color(0xFF566C7A), 2.5f*s, c+Offset(82*s,-80*s))
+        }
+        PetEmotion.PROUD.title -> {
+            drawSpark(c+Offset(-84*s,-82*s), 8*s, Color(0xFFFFD05F))
+            drawSpark(c+Offset(88*s,-105*s), 11*s, Color(0xFFFFD05F))
+        }
+        PetEmotion.HUNGRY.title -> {
+            drawCircle(Color.White.copy(alpha=.62f), 19*s, c+Offset(83*s,-91*s))
+            drawCircle(Color(0xFFE94C64), 8*s, c+Offset(83*s,-91*s))
+            drawLine(Color(0xFF397555), c+Offset(83*s,-99*s), c+Offset(90*s,-107*s), 3*s, StrokeCap.Round)
+        }
+        PetEmotion.DIRTY.title -> repeat(5) { i ->
+            drawCircle(Color(0xFF7B674E).copy(alpha=.45f), (3+i%2*2)*s, c+Offset((-55+i*27)*s,(18+i%3*18)*s))
+        }
+        PetEmotion.LONELY.title -> {
+            val drop = Path().apply {
+                moveTo(c.x+76*s,c.y-84*s)
+                lineTo(c.x+68*s,c.y-66*s)
+                quadraticBezierTo(c.x+76*s,c.y-56*s,c.x+84*s,c.y-66*s)
+                close()
+            }
+            drawPath(drop,Color(0xFF91D2EA).copy(alpha=.8f))
+        }
+        else -> Unit
     }
 }
 

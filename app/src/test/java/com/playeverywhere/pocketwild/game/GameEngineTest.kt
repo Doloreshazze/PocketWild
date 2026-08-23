@@ -57,4 +57,42 @@ class GameEngineTest {
         assertEquals(19, result.bondPoints)
         assertEquals(27, result.coins)
     }
+
+    @Test
+    fun pettingBuildsGentlenessButRewardHasCooldown() {
+        val start = 1_700_000_000_000L
+        val state = GameEngine.createPet("Люми", Species.FOX, start).copy(bondPoints = 0)
+
+        val firstPet = GameEngine.petPet(state, start + 10_000L).state
+        val secondPet = GameEngine.petPet(firstPet, start + 11_000L).state
+
+        assertEquals(2, firstPet.bondPoints)
+        assertEquals(firstPet.gentlePoints, secondPet.gentlePoints)
+        assertEquals(2, secondPet.bondPoints)
+        assertEquals(PetEmotion.AFFECTIONATE, secondPet.emotion)
+    }
+
+    @Test
+    fun urgentNeedOverridesTemporaryEmotion() {
+        val now = 1_700_000_000_000L
+        val state = GameState(
+            hasPet = true,
+            stats = PetStats(hunger = 10),
+            emotion = PetEmotion.EXCITED,
+            emotionUntil = now + 60_000L
+        )
+
+        assertEquals(PetEmotion.HUNGRY, GameEngine.emotion(state, now))
+    }
+
+    @Test
+    fun playingDevelopsPlayfulPersonality() {
+        val start = 1_700_000_000_000L
+        val state = GameEngine.createPet("Люми", Species.AXOLOTL, start)
+
+        val afterPlaying = GameEngine.act(state, CareAction.PLAY, start + 1_000L).state
+
+        assertTrue(afterPlaying.playfulPoints > state.playfulPoints)
+        assertEquals(PetEmotion.EXCITED, afterPlaying.emotion)
+    }
 }

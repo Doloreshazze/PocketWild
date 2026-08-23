@@ -29,6 +29,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         update(result.state)
     }
 
+    fun petPet() {
+        val result = GameEngine.petPet(_state.value)
+        update(result.state)
+    }
+
     private fun update(value: GameState) {
         _state.value = value
         store.save(value)
