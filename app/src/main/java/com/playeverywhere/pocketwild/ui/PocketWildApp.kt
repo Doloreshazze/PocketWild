@@ -1,9 +1,11 @@
 package com.playeverywhere.pocketwild.ui
 
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -40,6 +42,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,24 +57,32 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.playeverywhere.pocketwild.game.CareAction
+import com.playeverywhere.pocketwild.audio.PetVoice
+import com.playeverywhere.pocketwild.audio.VoiceCue
 import com.playeverywhere.pocketwild.game.GameEngine
 import com.playeverywhere.pocketwild.game.GameState
 import com.playeverywhere.pocketwild.game.GameViewModel
 import com.playeverywhere.pocketwild.game.Habitat
 import com.playeverywhere.pocketwild.game.PetStats
 import com.playeverywhere.pocketwild.game.Species
+import kotlinx.coroutines.delay
+import kotlin.math.PI
+import kotlin.math.sin
 
 private enum class AppTab(val title: String, val emoji: String) {
     HOME("Дом", "🏠"),
     EXPLORE("Мир", "🗺️"),
     JOURNAL("Дневник", "📖")
 }
+
+private data class ActionCue(val action: CareAction, val id: Int)
 
 @Composable
 fun PocketWildApp(viewModel: GameViewModel) {
@@ -192,6 +203,22 @@ private fun GameScreen(
 
 @Composable
 private fun HomeScreen(state: GameState, onAction: (CareAction) -> Unit, modifier: Modifier = Modifier) {
+    var cue by remember { mutableStateOf<ActionCue?>(null) }
+    var cueId by remember { mutableStateOf(0) }
+
+    LaunchedEffect(cue) {
+        val activeId = cue?.id ?: return@LaunchedEffect
+        delay(1_450)
+        if (cue?.id == activeId) cue = null
+    }
+
+    fun perform(action: CareAction) {
+        cueId += 1
+        cue = ActionCue(action, cueId)
+        PetVoice.play(state.species, VoiceCue.from(action))
+        onAction(action)
+    }
+
     Box(modifier.fillMaxSize()) {
         HabitatBackground(state.habitat, Modifier.fillMaxSize())
         Column(
@@ -206,9 +233,12 @@ private fun HomeScreen(state: GameState, onAction: (CareAction) -> Unit, modifie
             PetCharacter(
                 species = state.species,
                 mood = GameEngine.mood(state.stats),
+                action = cue?.action,
+                actionKey = cue?.id ?: 0,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    .clickable { PetVoice.play(state.species, VoiceCue.HELLO) }
             )
             StatsCard(state.stats)
             Row(
@@ -218,7 +248,7 @@ private fun HomeScreen(state: GameState, onAction: (CareAction) -> Unit, modifie
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 CareAction.entries.forEach { action ->
-                    ActionButton(action, modifier = Modifier.weight(1f)) { onAction(action) }
+                    ActionButton(action, modifier = Modifier.weight(1f)) { perform(action) }
                 }
             }
         }
@@ -510,73 +540,151 @@ private fun HabitatBackground(habitat: Habitat, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun PetCharacter(species: Species, mood: String, modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "pet-breathe")
+private fun PetCharacter(
+    species: Species,
+    mood: String,
+    modifier: Modifier = Modifier,
+    action: CareAction? = null,
+    actionKey: Int = 0
+) {
+    val transition = rememberInfiniteTransition(label = "pet-life")
     val bob by transition.animateFloat(
         initialValue = -5f,
         targetValue = 6f,
-        animationSpec = infiniteRepeatable(tween(1600, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "pet-bob"
+        animationSpec = infiniteRepeatable(tween(1_600, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "pet-breathe"
     )
-    Canvas(modifier) {
-        val scale = minOf(size.width, size.height) / 260f
-        val center = Offset(size.width / 2f, size.height / 2f + bob * scale)
-        drawOval(Color.Black.copy(alpha = .13f), Offset(center.x - 75f * scale, center.y + 91f * scale), Size(150f * scale, 25f * scale))
-        when (species) {
-            Species.FOX -> drawFox(center, scale, mood)
-            Species.AXOLOTL -> drawAxolotl(center, scale, mood)
-            Species.OWL -> drawOwl(center, scale, mood)
+    val idleWave by transition.animateFloat(
+        initialValue = -1f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(720, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "tail-and-wings"
+    )
+    val blink by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            keyframes {
+                durationMillis = 4_200
+                0f at 0
+                0f at 3_100
+                1f at 3_170
+                0f at 3_270
+                0f at 4_200
+            }
+        ),
+        label = "blink"
+    )
+    val actionProgress = remember { Animatable(1f) }
+    LaunchedEffect(actionKey) {
+        if (action != null) {
+            actionProgress.snapTo(0f)
+            actionProgress.animateTo(1f, tween(1_320, easing = FastOutSlowInEasing))
         }
+    }
+
+    Canvas(modifier) {
+        val s = minOf(size.width, size.height) / 260f
+        val p = actionProgress.value
+        val jump = when (action) {
+            CareAction.PLAY -> -sin(PI * p).toFloat() * 48f
+            CareAction.FEED -> -sin(PI * p).toFloat() * 13f
+            CareAction.CLEAN -> -sin(PI * p * 2).toFloat().coerceAtLeast(0f) * 8f
+            CareAction.REST -> p * 10f
+            null -> 0f
+        }
+        val tilt = when (action) {
+            CareAction.PLAY -> sin(PI * p * 3).toFloat() * 13f
+            CareAction.CLEAN -> sin(PI * p * 8).toFloat() * 6f
+            CareAction.FEED -> sin(PI * p * 4).toFloat() * 3f
+            else -> 0f
+        }
+        val motion = when (action) {
+            CareAction.PLAY -> sin(PI * p * 5).toFloat()
+            CareAction.CLEAN -> sin(PI * p * 8).toFloat()
+            else -> idleWave
+        }
+        val ground = Offset(size.width / 2f, size.height / 2f + bob * s)
+        val center = ground + Offset(0f, jump * s)
+        val eyesClosed = mood == "сонный" || action == CareAction.REST || blink > .55f
+        val mouthOpen = action == CareAction.FEED && p in .24f..82f
+
+        drawOval(
+            Color.Black.copy(alpha = .13f - (-jump / 48f).coerceIn(0f, 1f) * .06f),
+            Offset(ground.x - 75f * s, ground.y + 91f * s),
+            Size(150f * s, 25f * s)
+        )
+        drawActionEffects(action, p, center, s, behind = true)
+        rotate(tilt, pivot = center) {
+            when (species) {
+                Species.FOX -> drawFox(center, s, mood, eyesClosed, mouthOpen, motion)
+                Species.AXOLOTL -> drawAxolotl(center, s, mood, eyesClosed, mouthOpen, motion)
+                Species.OWL -> drawOwl(center, s, mood, eyesClosed, mouthOpen, motion)
+            }
+        }
+        drawActionEffects(action, p, center, s, behind = false)
     }
 }
 
-private fun DrawScope.drawFox(c: Offset, s: Float, mood: String) {
+private fun DrawScope.drawFox(c: Offset, s: Float, mood: String, eyesClosed: Boolean, mouthOpen: Boolean, motion: Float) {
     val orange = Color(0xFFFF8B5E)
+    val cheek = Color(0xFFFFE3C2)
+    drawArc(orange, 180f + motion * 12f, 250f, false, Offset(c.x + 30*s, c.y + (20 + motion*3)*s), Size(100*s, 90*s), style = Stroke(22*s, cap = StrokeCap.Round))
+    drawArc(cheek, 295f + motion * 12f, 70f, false, Offset(c.x + 30*s, c.y + (20 + motion*3)*s), Size(100*s, 90*s), style = Stroke(22*s, cap = StrokeCap.Round))
     drawOval(orange, Offset(c.x - 62*s, c.y + 22*s), Size(124*s, 85*s))
-    val leftEar = Path().apply { moveTo(c.x - 67*s, c.y - 42*s); lineTo(c.x - 48*s, c.y - 102*s); lineTo(c.x - 16*s, c.y - 55*s); close() }
-    val rightEar = Path().apply { moveTo(c.x + 67*s, c.y - 42*s); lineTo(c.x + 48*s, c.y - 102*s); lineTo(c.x + 16*s, c.y - 55*s); close() }
+    val earWiggle = motion * 4f
+    val leftEar = Path().apply { moveTo(c.x - 67*s, c.y - 42*s); lineTo(c.x + (-48 + earWiggle)*s, c.y - 102*s); lineTo(c.x - 16*s, c.y - 55*s); close() }
+    val rightEar = Path().apply { moveTo(c.x + 67*s, c.y - 42*s); lineTo(c.x + (48 + earWiggle)*s, c.y - 102*s); lineTo(c.x + 16*s, c.y - 55*s); close() }
     drawPath(leftEar, orange); drawPath(rightEar, orange)
     drawCircle(orange, 68*s, Offset(c.x, c.y - 20*s))
-    val cheek = Color(0xFFFFE3C2)
     drawCircle(cheek, 32*s, Offset(c.x - 25*s, c.y - 2*s)); drawCircle(cheek, 32*s, Offset(c.x + 25*s, c.y - 2*s))
     drawOval(cheek, Offset(c.x - 35*s, c.y - 18*s), Size(70*s, 57*s))
-    drawFace(c, s, mood, eyeY = -28f)
+    drawFace(c, s, mood, eyeY = -28f, eyesClosed = eyesClosed, mouthOpen = mouthOpen)
     drawCircle(Color(0xFF3B2B28), 7*s, Offset(c.x, c.y + 10*s))
-    drawArc(orange, 180f, 250f, false, Offset(c.x + 30*s, c.y + 20*s), Size(100*s, 90*s), style = Stroke(22*s, cap = StrokeCap.Round))
-    drawArc(cheek, 295f, 70f, false, Offset(c.x + 30*s, c.y + 20*s), Size(100*s, 90*s), style = Stroke(22*s, cap = StrokeCap.Round))
 }
 
-private fun DrawScope.drawAxolotl(c: Offset, s: Float, mood: String) {
+private fun DrawScope.drawAxolotl(c: Offset, s: Float, mood: String, eyesClosed: Boolean, mouthOpen: Boolean, motion: Float) {
     val pink = Color(0xFFFF91B8)
     val dark = Color(0xFFD75D8C)
     drawOval(pink, Offset(c.x - 58*s, c.y + 14*s), Size(116*s, 96*s))
     repeat(3) { i ->
         val dy = (-52 + i * 25) * s
-        drawLine(dark, Offset(c.x - 52*s, c.y + dy), Offset(c.x - 92*s, c.y + dy - 17*s), 9*s, StrokeCap.Round)
-        drawLine(dark, Offset(c.x + 52*s, c.y + dy), Offset(c.x + 92*s, c.y + dy - 17*s), 9*s, StrokeCap.Round)
+        val wave = motion * (7 - i) * s
+        drawLine(dark, Offset(c.x - 52*s, c.y + dy), Offset(c.x - 92*s - wave, c.y + dy - 17*s + wave), 9*s, StrokeCap.Round)
+        drawLine(dark, Offset(c.x + 52*s, c.y + dy), Offset(c.x + 92*s + wave, c.y + dy - 17*s - wave), 9*s, StrokeCap.Round)
     }
     drawRoundRect(pink, Offset(c.x - 68*s, c.y - 70*s), Size(136*s, 105*s), androidx.compose.ui.geometry.CornerRadius(55*s))
-    drawFace(c, s, mood, eyeY = -29f)
+    drawFace(c, s, mood, eyeY = -29f, eyesClosed = eyesClosed, mouthOpen = mouthOpen)
     drawCircle(Color(0xFFFFCAE0), 10*s, Offset(c.x - 44*s, c.y)); drawCircle(Color(0xFFFFCAE0), 10*s, Offset(c.x + 44*s, c.y))
-    drawArc(dark, 25f, 260f, false, Offset(c.x + 35*s, c.y + 45*s), Size(85*s, 45*s), style = Stroke(12*s, cap = StrokeCap.Round))
+    drawArc(dark, 25f + motion * 8f, 260f, false, Offset(c.x + 35*s, c.y + 45*s), Size(85*s, 45*s), style = Stroke(12*s, cap = StrokeCap.Round))
 }
 
-private fun DrawScope.drawOwl(c: Offset, s: Float, mood: String) {
+private fun DrawScope.drawOwl(c: Offset, s: Float, mood: String, eyesClosed: Boolean, mouthOpen: Boolean, motion: Float) {
     val purple = Color(0xFF9B8AE6)
     val cream = Color(0xFFFFE7B0)
+    val wingLift = kotlin.math.abs(motion) * 22f
     drawOval(purple, Offset(c.x - 66*s, c.y - 65*s), Size(132*s, 170*s))
-    drawOval(Color(0xFF7A67C2), Offset(c.x - 83*s, c.y - 10*s), Size(55*s, 105*s))
-    drawOval(Color(0xFF7A67C2), Offset(c.x + 28*s, c.y - 10*s), Size(55*s, 105*s))
+    drawOval(Color(0xFF7A67C2), Offset(c.x - 83*s, c.y + (-10 - wingLift)*s), Size(55*s, 105*s))
+    drawOval(Color(0xFF7A67C2), Offset(c.x + 28*s, c.y + (-10 - wingLift)*s), Size(55*s, 105*s))
     drawCircle(cream, 39*s, Offset(c.x - 31*s, c.y - 33*s)); drawCircle(cream, 39*s, Offset(c.x + 31*s, c.y - 33*s))
-    drawFace(c, s, mood, eyeY = -35f, eyeSpread = 31f)
-    val beak = Path().apply { moveTo(c.x - 9*s, c.y - 8*s); lineTo(c.x + 9*s, c.y - 8*s); lineTo(c.x, c.y + 10*s); close() }
+    drawFace(c, s, mood, eyeY = -35f, eyeSpread = 31f, eyesClosed = eyesClosed, mouthOpen = mouthOpen)
+    val beakDrop = if (mouthOpen) 8f else 0f
+    val beak = Path().apply { moveTo(c.x - 9*s, c.y - 8*s); lineTo(c.x + 9*s, c.y - 8*s); lineTo(c.x, c.y + (10 + beakDrop)*s); close() }
     drawPath(beak, Color(0xFFFFB457))
     repeat(3) { i -> drawArc(cream.copy(alpha = .8f), 200f, 140f, false, Offset(c.x - (38 - i*18)*s, c.y + (28 + i%2*13)*s), Size(40*s, 26*s), style = Stroke(4*s)) }
 }
 
-private fun DrawScope.drawFace(c: Offset, s: Float, mood: String, eyeY: Float, eyeSpread: Float = 24f) {
+private fun DrawScope.drawFace(
+    c: Offset,
+    s: Float,
+    mood: String,
+    eyeY: Float,
+    eyeSpread: Float = 24f,
+    eyesClosed: Boolean,
+    mouthOpen: Boolean
+) {
     val dark = Color(0xFF302A31)
-    if (mood == "сонный") {
+    if (eyesClosed) {
         drawArc(dark, 15f, 150f, false, Offset(c.x - (eyeSpread+10)*s, c.y + (eyeY-5)*s), Size(20*s, 12*s), style = Stroke(4*s, cap = StrokeCap.Round))
         drawArc(dark, 15f, 150f, false, Offset(c.x + (eyeSpread-10)*s, c.y + (eyeY-5)*s), Size(20*s, 12*s), style = Stroke(4*s, cap = StrokeCap.Round))
     } else {
@@ -585,9 +693,77 @@ private fun DrawScope.drawFace(c: Offset, s: Float, mood: String, eyeY: Float, e
         drawCircle(Color.White, 2*s, Offset(c.x - (eyeSpread+2)*s, c.y + (eyeY-2)*s))
         drawCircle(Color.White, 2*s, Offset(c.x + (eyeSpread-2)*s, c.y + (eyeY-2)*s))
     }
-    val smileSweep = if (mood == "скучает" || mood == "голодный") -140f else 140f
-    val start = if (smileSweep < 0) 20f else 20f
-    drawArc(dark, start, smileSweep, false, Offset(c.x - 13*s, c.y - 1*s), Size(26*s, 18*s), style = Stroke(3*s, cap = StrokeCap.Round))
+    if (mouthOpen) {
+        drawOval(dark, Offset(c.x - 11*s, c.y + 19*s), Size(22*s, 22*s))
+        drawArc(Color(0xFFFF8FA3), 180f, 180f, true, Offset(c.x - 7*s, c.y + 29*s), Size(14*s, 8*s))
+    } else {
+        val smileSweep = if (mood == "скучает" || mood == "голодный") -140f else 140f
+        drawArc(dark, 20f, smileSweep, false, Offset(c.x - 13*s, c.y - 1*s), Size(26*s, 18*s), style = Stroke(3*s, cap = StrokeCap.Round))
+    }
+}
+
+private fun DrawScope.drawActionEffects(action: CareAction?, p: Float, c: Offset, s: Float, behind: Boolean) {
+    when (action) {
+        CareAction.FEED -> if (!behind) {
+            val travel = (p / .72f).coerceIn(0f, 1f)
+            if (p < .8f) {
+                val berry = Offset(
+                    c.x + (125f * (1f - travel)) * s,
+                    c.y - (18f + sin(PI * travel).toFloat() * 82f) * s
+                )
+                drawCircle(Color(0xFFE94C64), 13*s, berry)
+                drawCircle(Color(0xFFFF7D8E), 3*s, berry + Offset(-4*s, -4*s))
+                drawLine(Color(0xFF3C895B), berry + Offset(0f, -11*s), berry + Offset(7*s, -22*s), 4*s, StrokeCap.Round)
+            } else {
+                repeat(3) { i -> drawHeart(c + Offset((-42 + i*42)*s, (-105 - i%2*18)*s), 8*s, (1f-p).coerceIn(0f, .2f)*5f) }
+            }
+        }
+        CareAction.PLAY -> if (!behind) {
+            val ball = Offset(c.x + (115f - p*230f)*s, c.y + (60f - kotlin.math.abs(sin(PI*p*2)).toFloat()*100f)*s)
+            drawCircle(Color(0xFFFFC857), 18*s, ball)
+            drawArc(Color(0xFFFF8B5E), 25f, 150f, false, ball - Offset(13*s, 13*s), Size(26*s, 26*s), style = Stroke(5*s))
+            repeat(4) { i -> drawSpark(c + Offset((-105 + i*70)*s, (-95 + i%2*35)*s), 7*s, Color(0xFFFFE38E)) }
+        }
+        CareAction.CLEAN -> {
+            if (behind) repeat(8) { i ->
+                val local = (p + i*.14f) % 1f
+                val x = c.x + (-92 + (i*31)%185)*s
+                val y = c.y + (95 - local*225)*s
+                drawCircle(Color(0xFFBEEBFF).copy(alpha = .35f + (1f-local)*.45f), (7 + i%3*4)*s, Offset(x,y), style = Stroke(3*s))
+            }
+        }
+        CareAction.REST -> if (!behind) {
+            repeat(3) { i ->
+                val alpha = (.3f + p*.7f - i*.12f).coerceIn(0f, 1f)
+                drawZ(c + Offset((62+i*25)*s, (-70-i*35)*s), (11+i*2)*s, Color.White.copy(alpha = alpha))
+            }
+        }
+        null -> Unit
+    }
+}
+
+private fun DrawScope.drawSpark(c: Offset, r: Float, color: Color) {
+    drawLine(color, c - Offset(r, 0f), c + Offset(r, 0f), 3f, StrokeCap.Round)
+    drawLine(color, c - Offset(0f, r), c + Offset(0f, r), 3f, StrokeCap.Round)
+}
+
+private fun DrawScope.drawZ(c: Offset, r: Float, color: Color) {
+    drawLine(color, c - Offset(r, r*.7f), c + Offset(r, -r*.7f), 4f, StrokeCap.Round)
+    drawLine(color, c + Offset(r, -r*.7f), c - Offset(r, r*.7f), 4f, StrokeCap.Round)
+    drawLine(color, c - Offset(r, r*.7f), c + Offset(r, r*.7f), 4f, StrokeCap.Round)
+}
+
+private fun DrawScope.drawHeart(c: Offset, r: Float, alpha: Float) {
+    val color = Color(0xFFFF6F91).copy(alpha = alpha.coerceIn(0f,1f))
+    drawCircle(color, r*.58f, c - Offset(r*.45f, r*.25f))
+    drawCircle(color, r*.58f, c + Offset(r*.45f, -r*.25f))
+    val bottom = Path().apply {
+        moveTo(c.x-r, c.y)
+        lineTo(c.x+r, c.y)
+        lineTo(c.x, c.y+r*1.5f)
+        close()
+    }
+    drawPath(bottom, color)
 }
 
 private fun habitatColor(habitat: Habitat): Color = when (habitat) {
